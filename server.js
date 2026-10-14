@@ -403,7 +403,10 @@ async function renderStoryVideo(storyData, jobDir) {
 }
 
 async function handleStoryRender(req, res) {
-  const storyData = req.body;
+  let storyData = req.body;
+  if (Array.isArray(storyData)) {
+    storyData = storyData[0];
+  }
   if (!storyData || !storyData.scenes) {
     return res.status(400).json({ error: "Invalid payload: 'scenes' array is required" });
   }
@@ -639,11 +642,43 @@ function createJob(operation, inputs, options = {}) {
 
 // Async story endpoint
 app.post(["/jobs/story", "/render/jobs/story"], (req, res) => {
-  if (!req.body || !req.body.scenes) {
+  let payload = req.body;
+
+  // Support array of stories (e.g., both EN & TA generated together)
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) {
+      return res.status(400).json({ error: "Invalid payload: array is empty" });
+    }
+    const createdJobs = [];
+    for (const item of payload) {
+      if (item && item.scenes) {
+        const job = createJob("story", [], { storyData: item });
+        createdJobs.push({
+          jobId: job.id,
+          storyId: item.story_id,
+          language: item.language,
+          status: job.status,
+          pollUrl: `/render/jobs/${job.id}`,
+          downloadUrl: `/render/jobs/${job.id}/download`,
+        });
+      }
+    }
+    if (createdJobs.length === 0) {
+      return res.status(400).json({
+        error: "Invalid payload: 'scenes' array is required in each story object",
+      });
+    }
+    return res.status(202).json({
+      message: `${createdJobs.length} story job(s) queued successfully`,
+      jobs: createdJobs,
+    });
+  }
+
+  if (!payload || !payload.scenes) {
     return res.status(400).json({ error: "Invalid payload: 'scenes' array is required" });
   }
 
-  const job = createJob("story", [], { storyData: req.body });
+  const job = createJob("story", [], { storyData: payload });
   res.status(202).json({
     message: "Story job queued successfully",
     jobId: job.id,
